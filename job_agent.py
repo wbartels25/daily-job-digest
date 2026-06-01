@@ -1,42 +1,41 @@
 #!/usr/bin/env python3
 """
-Daily Job Digest — job_agent.py  (v2)
+Daily Job Digest — job_agent.py  (v3)
 Searches for senior executive roles (MD, VP, EVP, SVP) in AI, IT Outsourcing,
 Managed Services, Cloud, and Technology Consulting and emails a digest.
 
-Job sources used (all free, no API key required):
-  - Arbeitnow  (public free API, no key)
-  - Remotive    (public free API, no key)
-  - RemoteOK    (public free JSON, no key)
-  - The Muse    (public free API, no key)
+Job sources (all free, no API key required):
+  - Arbeitnow  (public free API)
+  - Remotive    (public free API)
+  - RemoteOK    (public free JSON)
+  - The Muse    (public free API)
+
+Email delivery: SendGrid API (free tier = 100 emails/day)
 
 Required GitHub Secrets:
-  EMAIL_TO            — recipient address
-  GMAIL_USER          — sender Gmail address
-  GMAIL_APP_PASSWORD  — Gmail App Password (16 chars, no spaces)
+  EMAIL_TO          — recipient address
+  SENDGRID_API_KEY  — from app.sendgrid.com (free account)
+  GMAIL_USER        — used as the "from" address (no password needed)
 """
 
 import os
 import json
-import smtplib
 import datetime
 import hashlib
 import time
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from urllib.request import urlopen, Request
-from urllib.parse import urlencode, quote_plus
+from urllib.parse import quote_plus
 from urllib.error import URLError
+import urllib.request
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-EMAIL_TO           = os.environ["EMAIL_TO"]
-GMAIL_USER         = os.environ["GMAIL_USER"]
-GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"].replace(" ", "")
+EMAIL_TO         = os.environ["EMAIL_TO"]
+SENDGRID_API_KEY = os.environ["SENDGRID_API_KEY"]
+FROM_EMAIL       = os.environ.get("GMAIL_USER", "bartelswindy@gmail.com")
 
 SEEN_FILE = "seen_jobs.json"
 
-# Title keywords — at least one must appear in job title
 TITLE_KEYWORDS = [
     "managing director",
     "vice president",
@@ -50,7 +49,6 @@ TITLE_KEYWORDS = [
     "senior vice president",
 ]
 
-# Relevance boosters from Windy's background
 RELEVANT_KEYWORDS = [
     "ai", "artificial intelligence", "machine learning",
     "managed services", "outsourcing", "cloud", "digital transformation",
@@ -59,7 +57,6 @@ RELEVANT_KEYWORDS = [
     "cyber", "automation", "data", "analytics", "strategic",
 ]
 
-# Search terms for The Muse API
 MUSE_QUERIES = [
     "Managing Director Technology",
     "Vice President AI",
@@ -120,7 +117,6 @@ def relevance_score(title: str, snippet: str) -> int:
 # ── Job Sources ───────────────────────────────────────────────────────────────
 
 def fetch_arbeitnow() -> list:
-    """Arbeitnow — free public API, tech jobs, no key needed."""
     jobs = []
     url = "https://www.arbeitnow.com/api/job-board-api"
     raw = fetch_url(url)
@@ -129,27 +125,23 @@ def fetch_arbeitnow() -> list:
     try:
         data = json.loads(raw)
         for item in data.get("data", []):
-            title    = (item.get("title")    or "").strip()
+            title    = (item.get("title")        or "").strip()
             company  = (item.get("company_name") or "").strip()
-            location = (item.get("location") or "Remote").strip()
-            link     = (item.get("url")      or "").strip()
-            desc     = (item.get("description") or "")[:300]
+            location = (item.get("location")     or "Remote").strip()
+            link     = (item.get("url")          or "").strip()
+            desc     = (item.get("description")  or "")[:300]
             tags     = " ".join(item.get("tags", []))
-
             if title and link and title_is_senior(title):
-                jobs.append({
-                    "title": title, "company": company, "location": location,
-                    "url": link, "snippet": desc, "source": "Arbeitnow",
-                    "date": item.get("created_at", ""),
-                    "score": relevance_score(title, desc + " " + tags),
-                })
+                jobs.append({"title": title, "company": company, "location": location,
+                             "url": link, "snippet": desc, "source": "Arbeitnow",
+                             "date": item.get("created_at", ""),
+                             "score": relevance_score(title, desc + " " + tags)})
     except Exception as e:
-        print(f"  Arbeitnow parse error: {e}")
+        print(f"  Arbeitnow error: {e}")
     return jobs
 
 
 def fetch_remotive() -> list:
-    """Remotive — free public API for remote tech jobs."""
     jobs = []
     for cat in ["software-dev", "management-finance", "all-others"]:
         url = f"https://remotive.com/api/remote-jobs?category={cat}&limit=100"
@@ -164,22 +156,18 @@ def fetch_remotive() -> list:
                 location = (item.get("candidate_required_location") or "Remote").strip()
                 link     = (item.get("url")          or "").strip()
                 desc     = (item.get("description")  or "")[:300]
-
                 if title and link and title_is_senior(title):
-                    jobs.append({
-                        "title": title, "company": company, "location": location,
-                        "url": link, "snippet": desc, "source": "Remotive",
-                        "date": item.get("publication_date", ""),
-                        "score": relevance_score(title, desc),
-                    })
+                    jobs.append({"title": title, "company": company, "location": location,
+                                 "url": link, "snippet": desc, "source": "Remotive",
+                                 "date": item.get("publication_date", ""),
+                                 "score": relevance_score(title, desc)})
         except Exception as e:
-            print(f"  Remotive parse error ({cat}): {e}")
+            print(f"  Remotive error ({cat}): {e}")
         time.sleep(1)
     return jobs
 
 
 def fetch_remoteok() -> list:
-    """RemoteOK — free JSON feed."""
     jobs = []
     url = "https://remoteok.com/api"
     raw = fetch_url(url)
@@ -195,22 +183,17 @@ def fetch_remoteok() -> list:
             link    = (item.get("url")      or "").strip()
             desc    = (item.get("description") or "")[:300]
             tags    = " ".join(item.get("tags", []) or [])
-
             if title and link and title_is_senior(title):
-                jobs.append({
-                    "title": title, "company": company,
-                    "location": "Remote",
-                    "url": link, "snippet": desc, "source": "RemoteOK",
-                    "date": str(item.get("date", "")),
-                    "score": relevance_score(title, desc + " " + tags),
-                })
+                jobs.append({"title": title, "company": company, "location": "Remote",
+                             "url": link, "snippet": desc, "source": "RemoteOK",
+                             "date": str(item.get("date", "")),
+                             "score": relevance_score(title, desc + " " + tags)})
     except Exception as e:
-        print(f"  RemoteOK parse error: {e}")
+        print(f"  RemoteOK error: {e}")
     return jobs
 
 
 def fetch_the_muse() -> list:
-    """The Muse — free public API, US jobs, no key needed for basic use."""
     jobs = []
     for query in MUSE_QUERIES:
         q = quote_plus(query)
@@ -226,54 +209,52 @@ def fetch_the_muse() -> list:
                 locs    = item.get("locations", []) or []
                 location = ", ".join(loc.get("name", "") for loc in locs) or "US"
                 link    = (item.get("refs", {}) or {}).get("landing_page", "").strip()
-                desc    = ""  # The Muse doesn't include snippet in list view
-
                 if title and link and title_is_senior(title):
-                    jobs.append({
-                        "title": title, "company": company, "location": location,
-                        "url": link, "snippet": desc, "source": "The Muse",
-                        "date": item.get("publication_date", ""),
-                        "score": relevance_score(title, desc),
-                    })
+                    jobs.append({"title": title, "company": company, "location": location,
+                                 "url": link, "snippet": "", "source": "The Muse",
+                                 "date": item.get("publication_date", ""),
+                                 "score": relevance_score(title, "")})
         except Exception as e:
-            print(f"  The Muse parse error ({query}): {e}")
+            print(f"  The Muse error ({query}): {e}")
         time.sleep(1)
     return jobs
 
 
-# ── Email ─────────────────────────────────────────────────────────────────────
+# ── Email via SendGrid API ────────────────────────────────────────────────────
 
 def build_html(jobs: list) -> str:
     today = datetime.date.today().strftime("%B %d, %Y")
     rows = ""
     for j in jobs:
-        score_badge = ""
         if j["score"] >= 3:
-            score_badge = (' <span style="background:#1a7f37;color:#fff;'
-                           'padding:2px 7px;border-radius:10px;font-size:11px;">Strong Match</span>')
+            badge = (' <span style="background:#1a7f37;color:#fff;padding:2px 7px;'
+                     'border-radius:10px;font-size:11px;">Strong Match</span>')
         elif j["score"] >= 1:
-            score_badge = (' <span style="background:#9a6700;color:#fff;'
-                           'padding:2px 7px;border-radius:10px;font-size:11px;">Relevant</span>')
+            badge = (' <span style="background:#9a6700;color:#fff;padding:2px 7px;'
+                     'border-radius:10px;font-size:11px;">Relevant</span>')
+        else:
+            badge = ""
+
+        snippet_html = (f'<div style="font-size:13px;color:#374151;margin-top:8px;">'
+                        f'{j["snippet"][:200]}</div>') if j.get("snippet") else ""
 
         rows += f"""
         <tr>
           <td style="padding:16px;border-bottom:1px solid #e5e7eb;vertical-align:top;">
             <div style="font-size:16px;font-weight:600;">
-              <a href="{j['url']}" style="color:#2563eb;text-decoration:none;">{j['title']}</a>{score_badge}
+              <a href="{j['url']}" style="color:#2563eb;text-decoration:none;">{j['title']}</a>{badge}
             </div>
             <div style="font-size:13px;color:#6b7280;margin-top:4px;">
               {j.get('company','') or '&nbsp;'}
               {(' &bull; ' + j['location']) if j.get('location') else ''}
               {(' &bull; ' + j['source']) if j.get('source') else ''}
             </div>
-            {'<div style="font-size:13px;color:#374151;margin-top:8px;">' + j.get('snippet','')[:200] + '</div>' if j.get('snippet') else ''}
+            {snippet_html}
           </td>
         </tr>"""
 
-    no_jobs_row = """
-        <tr><td style="padding:32px;color:#6b7280;text-align:center;">
-          No new matching roles today. Check back tomorrow!
-        </td></tr>""" if not rows else ""
+    no_jobs = ('<tr><td style="padding:32px;color:#6b7280;text-align:center;">'
+               'No new matching roles today. Check back tomorrow!</td></tr>') if not rows else ""
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"></head>
@@ -298,12 +279,12 @@ def build_html(jobs: list) -> str:
     </td>
   </tr>
   <table width="100%" cellpadding="0" cellspacing="0">
-    {rows}{no_jobs_row}
+    {rows}{no_jobs}
   </table>
   <tr>
     <td style="padding:20px 32px;border-top:1px solid #e5e7eb;background:#f9fafb;">
       <div style="font-size:11px;color:#9ca3af;">
-        Digest for Windy Bartels &bull; Roles: MD, VP, EVP, SVP &bull;
+        Digest for Windy Bartels &bull; MD / VP / EVP / SVP &bull;
         AI / IT Outsourcing / Managed Services / Cloud / Technology Consulting &bull;
         Open to Relocation
       </div>
@@ -318,60 +299,67 @@ def build_html(jobs: list) -> str:
 def send_email(html: str, job_count: int):
     subject = (f"[Job Digest] {job_count} New Senior "
                f"Role{'s' if job_count != 1 else ''} — {datetime.date.today()}")
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = GMAIL_USER
-    msg["To"]      = EMAIL_TO
-    msg.attach(MIMEText(html, "html"))
 
-    print(f"Connecting to Gmail SMTP (port 587)...")
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-        server.sendmail(GMAIL_USER, EMAIL_TO, msg.as_string())
+    payload = json.dumps({
+        "personalizations": [{"to": [{"email": EMAIL_TO}]}],
+        "from": {"email": FROM_EMAIL, "name": "Daily Job Digest"},
+        "subject": subject,
+        "content": [{"type": "text/html", "value": html}]
+    }).encode("utf-8")
+
+    req = Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {SENDGRID_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST"
+    )
+
+    with urlopen(req, timeout=30) as resp:
+        status = resp.status
+    print(f"SendGrid response: HTTP {status}")
+    if status not in (200, 202):
+        raise RuntimeError(f"SendGrid returned HTTP {status}")
     print(f"Email sent: '{subject}'")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    print(f"Daily Job Digest starting — {datetime.datetime.utcnow().isoformat()}Z")
+    print(f"Daily Job Digest v3 — {datetime.datetime.utcnow().isoformat()}Z")
     seen = load_seen()
     all_jobs = []
 
     print("\nFetching from Arbeitnow...")
     all_jobs.extend(fetch_arbeitnow())
-    print(f"  Got {len(all_jobs)} senior roles so far")
+    print(f"  {len(all_jobs)} senior roles so far")
 
     print("\nFetching from Remotive...")
     before = len(all_jobs)
     all_jobs.extend(fetch_remotive())
-    print(f"  Got {len(all_jobs) - before} new roles")
+    print(f"  +{len(all_jobs) - before} roles")
 
     print("\nFetching from RemoteOK...")
     before = len(all_jobs)
     all_jobs.extend(fetch_remoteok())
-    print(f"  Got {len(all_jobs) - before} new roles")
+    print(f"  +{len(all_jobs) - before} roles")
 
     print("\nFetching from The Muse...")
     before = len(all_jobs)
     all_jobs.extend(fetch_the_muse())
-    print(f"  Got {len(all_jobs) - before} new roles")
+    print(f"  +{len(all_jobs) - before} roles")
 
-    # Deduplicate by URL hash
-    new_jobs = []
-    new_ids  = set()
+    # Deduplicate
+    new_jobs, new_ids = [], set()
     for job in all_jobs:
         jid = job_id(job["url"])
         if jid not in seen and jid not in new_ids:
             new_jobs.append(job)
             new_ids.add(jid)
 
-    # Sort: strong matches first
     new_jobs.sort(key=lambda j: -j["score"])
-
     print(f"\nTotal fetched: {len(all_jobs)} | New (unseen): {len(new_jobs)}")
 
     send_email(build_html(new_jobs), len(new_jobs))
