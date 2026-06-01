@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
 """
-Daily Job Digest v3 - SendGrid edition
+Daily Job Digest v4 - Gmail SMTP edition
 Senior exec roles: MD, VP, EVP, SVP
 Industries: AI, IT Outsourcing, Managed Services, Cloud, Technology Consulting
 
 Required GitHub Secrets:
-  EMAIL_TO          - recipient address
-  SENDGRID_API_KEY  - from app.sendgrid.com (free account, 100 emails/day)
-  GMAIL_USER        - used as the from address
+  EMAIL_TO           - recipient address
+  GMAIL_USER         - sender Gmail address (bartelswindy@gmail.com)
+  GMAIL_APP_PASSWORD - 16-char App Password from myaccount.google.com/apppasswords
 """
 
-import os, json, datetime, hashlib, time
+import os, json, datetime, hashlib, time, smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from urllib.request import urlopen, Request
 from urllib.parse import quote_plus
 from urllib.error import URLError
 
-EMAIL_TO         = os.environ["EMAIL_TO"]
-SENDGRID_API_KEY = os.environ["SENDGRID_API_KEY"]
-FROM_EMAIL       = os.environ.get("GMAIL_USER", "bartelswindy@gmail.com")
-SEEN_FILE        = "seen_jobs.json"
+EMAIL_TO           = os.environ["EMAIL_TO"]
+GMAIL_USER         = os.environ["GMAIL_USER"]
+GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"].strip().replace(" ", "")
+SEEN_FILE          = "seen_jobs.json"
 
 TITLE_KEYWORDS = [
     "managing director", "vice president", " vp ", "vp,", "vp-",
@@ -202,21 +204,24 @@ def build_html(jobs):
 
 def send_email(html, job_count):
     subject = f"[Job Digest] {job_count} New Senior Role{'s' if job_count!=1 else ''} - {datetime.date.today()}"
-    payload = json.dumps({
-        "personalizations": [{"to": [{"email": EMAIL_TO}]}],
-        "from": {"email": FROM_EMAIL, "name": "Daily Job Digest"},
-        "subject": subject,
-        "content": [{"type": "text/html", "value": html}]
-    }).encode("utf-8")
-    req = Request("https://api.sendgrid.com/v3/mail/send", data=payload,
-        headers={"Authorization": f"Bearer {SENDGRID_API_KEY}",
-                 "Content-Type": "application/json"}, method="POST")
-    with urlopen(req, timeout=30) as resp:
-        print(f"SendGrid HTTP {resp.status} - email sent: {subject}")
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = GMAIL_USER
+    msg["To"]      = EMAIL_TO
+    msg.attach(MIMEText(html, "html"))
+
+    print(f"Connecting to smtp.gmail.com:587 as {GMAIL_USER} ...")
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+        server.sendmail(GMAIL_USER, EMAIL_TO, msg.as_string())
+    print(f"Email sent: {subject}")
 
 
 def main():
-    print(f"Daily Job Digest v3 - {datetime.datetime.utcnow().isoformat()}Z")
+    print(f"Daily Job Digest v4 - {datetime.datetime.utcnow().isoformat()}Z")
     seen = load_seen()
     all_jobs = []
 
