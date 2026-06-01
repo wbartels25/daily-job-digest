@@ -23,14 +23,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install sendgrid
-
       - name: Run job agent
         env:
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: python job_agent.py
 
       - name: Persist seen-jobs memory
