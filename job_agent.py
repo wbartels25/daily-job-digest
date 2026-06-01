@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Daily Job Digest v4 - Gmail SMTP edition
+Daily Job Digest v5 - Outlook SMTP edition
 Senior exec roles: MD, VP, EVP, SVP
 Industries: AI, IT Outsourcing, Managed Services, Cloud, Technology Consulting
 
 Required GitHub Secrets:
-  EMAIL_TO           - recipient address
-  GMAIL_USER         - sender Gmail address (bartelswindy@gmail.com)
-  GMAIL_APP_PASSWORD - 16-char App Password from myaccount.google.com/apppasswords
+  EMAIL_TO      - recipient address (bartelswindy@gmail.com)
+  SMTP_USER     - windy@hiveadvisorygroup.com
+  SMTP_PASSWORD - Outlook password for hiveadvisorygroup.com
 """
 
 import os, json, datetime, hashlib, time, smtplib
@@ -17,10 +17,10 @@ from urllib.request import urlopen, Request
 from urllib.parse import quote_plus
 from urllib.error import URLError
 
-EMAIL_TO           = os.environ["EMAIL_TO"]
-GMAIL_USER         = os.environ["GMAIL_USER"]
-GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"].strip().replace(" ", "")
-SEEN_FILE          = "seen_jobs.json"
+EMAIL_TO      = os.environ["EMAIL_TO"]
+SMTP_USER     = os.environ["SMTP_USER"]
+SMTP_PASSWORD = os.environ["SMTP_PASSWORD"]
+SEEN_FILE     = "seen_jobs.json"
 
 TITLE_KEYWORDS = [
     "managing director", "vice president", " vp ", "vp,", "vp-",
@@ -206,22 +206,22 @@ def send_email(html, job_count):
     subject = f"[Job Digest] {job_count} New Senior Role{'s' if job_count!=1 else ''} - {datetime.date.today()}"
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"]    = GMAIL_USER
+    msg["From"]    = SMTP_USER
     msg["To"]      = EMAIL_TO
     msg.attach(MIMEText(html, "html"))
 
-    print(f"Connecting to smtp.gmail.com:587 as {GMAIL_USER} ...")
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+    print(f"Connecting to smtp.office365.com:587 as {SMTP_USER} ...")
+    with smtplib.SMTP("smtp.office365.com", 587) as server:
         server.ehlo()
         server.starttls()
         server.ehlo()
-        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-        server.sendmail(GMAIL_USER, EMAIL_TO, msg.as_string())
+        server.login(SMTP_USER, SMTP_PASSWORD)
+        server.sendmail(SMTP_USER, EMAIL_TO, msg.as_string())
     print(f"Email sent: {subject}")
 
 
 def main():
-    print(f"Daily Job Digest v4 - {datetime.datetime.utcnow().isoformat()}Z")
+    print(f"Daily Job Digest v5 - {datetime.datetime.utcnow().isoformat()}Z")
     seen = load_seen()
     all_jobs = []
 
