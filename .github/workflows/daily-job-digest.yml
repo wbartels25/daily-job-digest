@@ -26,8 +26,8 @@ jobs:
       - name: Run job agent
         env:
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
-          GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: python job_agent.py
 
       - name: Persist seen-jobs memory
