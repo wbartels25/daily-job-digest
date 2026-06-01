@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Daily Job Digest v5 - Outlook SMTP edition
+Daily Job Digest v6 - Hotmail SMTP edition
 Senior exec roles: MD, VP, EVP, SVP
 Industries: AI, IT Outsourcing, Managed Services, Cloud, Technology Consulting
 
 Required GitHub Secrets:
   EMAIL_TO      - recipient address (bartelswindy@gmail.com)
-  SMTP_USER     - windy@hiveadvisorygroup.com
-  SMTP_PASSWORD - Outlook password for hiveadvisorygroup.com
+  SMTP_USER     - wsurfield@hotmail.com
+  SMTP_PASSWORD - App password for wsurfield@hotmail.com
 """
 
 import os, json, datetime, hashlib, time, smtplib
@@ -210,8 +210,8 @@ def send_email(html, job_count):
     msg["To"]      = EMAIL_TO
     msg.attach(MIMEText(html, "html"))
 
-    print(f"Connecting to smtp.office365.com:587 as {SMTP_USER} ...")
-    with smtplib.SMTP("smtp.office365.com", 587) as server:
+    print(f"Connecting to smtp-mail.outlook.com:587 as {SMTP_USER} ...")
+    with smtplib.SMTP("smtp-mail.outlook.com", 587) as server:
         server.ehlo()
         server.starttls()
         server.ehlo()
