@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Daily Job Digest v7 - Console Output edition
+Daily Job Digest v8 - Console Output edition
 Senior exec roles: MD, VP, EVP, SVP
 Industries: AI, IT Outsourcing, Managed Services, Cloud, Technology Consulting
 
+Sources: Arbeitnow, Remotive, RemoteOK, The Muse, Indeed RSS, LinkedIn (search links)
 No email needed - results printed to console for direct viewing.
 """
 
-import os, json, datetime, hashlib, time
+import os, json, datetime, hashlib, time, xml.etree.ElementTree as ET
 from urllib.request import urlopen, Request
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
 from urllib.error import URLError
 
 SEEN_FILE = "seen_jobs.json"
@@ -25,6 +26,13 @@ RELEVANCE_KEYWORDS = [
     "technology consulting", "platform", "gsi", "governance",
     "portfolio", "enterprise", "saas", "it services", "cybersecurity",
     "automation", "analytics", "strategic",
+]
+
+# LinkedIn direct search URLs (for click-through in digest output)
+LINKEDIN_SEARCH_URLS = [
+    ("Managing Director", "https://www.linkedin.com/jobs/search/?keywords=Managing+Director&f_E=5%2C6&f_I=96%2C4&sortBy=DD"),
+    ("VP / SVP / EVP", "https://www.linkedin.com/jobs/search/?keywords=Vice+President+Technology+AI&f_E=5%2C6&sortBy=DD"),
+    ("SVP AI / Cloud", "https://www.linkedin.com/jobs/search/?keywords=SVP+AI+Cloud+Managed+Services&f_E=5%2C6&sortBy=DD"),
 ]
 
 def load_seen():
@@ -139,40 +147,114 @@ def fetch_themuse():
         print(f"  The Muse error: {e}")
     return jobs
 
+def fetch_indeed_rss():
+    """Fetch Indeed jobs via their public RSS feed."""
+    jobs = []
+    queries = [
+        "Managing Director AI Technology",
+        "Vice President Managed Services Cloud",
+        "SVP EVP Technology Outsourcing",
+    ]
+    try:
+        for query in queries:
+            encoded = quote_plus(query)
+            url = f"https://www.indeed.com/rss?q={encoded}&l=United+States&sort=date&limit=20"
+            req = Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/rss+xml, application/xml, text/xml",
+            })
+            try:
+                resp = urlopen(req, timeout=12)
+                raw = resp.read().decode("utf-8", errors="ignore")
+                root = ET.fromstring(raw)
+                ns = ""
+                for item in root.findall(f".//{ns}item"):
+                    title_el = item.find("title")
+                    link_el = item.find("link")
+                    desc_el = item.find("description")
+                    title = title_el.text if title_el is not None else ""
+                    link = link_el.text if link_el is not None else ""
+                    desc = desc_el.text if desc_el is not None else ""
+                    # Extract company from description (Indeed format: "Company - Location")
+                    company = ""
+                    if " - " in title:
+                        parts = title.rsplit(" - ", 1)
+                        title = parts[0].strip()
+                        company = parts[1].strip() if len(parts) > 1 else ""
+                    if is_exec_title(title):
+                        jobs.append({
+                            "title": title,
+                            "company": company,
+                            "location": "USA",
+                            "url": link,
+                            "source": "Indeed",
+                            "description": desc[:300] if desc else "",
+                        })
+            except Exception as e:
+                print(f"  Indeed RSS query '{query}' error: {e}")
+            time.sleep(1)
+    except Exception as e:
+        print(f"  Indeed error: {e}")
+    return jobs
+
 def print_digest(jobs):
+    now_str = datetime.datetime.utcnow().strftime("%B %d, %Y")
+
     if not jobs:
-        print("\n  No new senior executive roles found today.")
-        return
+        print("\n" + "="*70)
+        print(f"  DAILY JOB DIGEST - {now_str}")
+        print("  No new senior executive roles found today from API sources.")
+        print("="*70)
+    else:
+        print("\n" + "="*70)
+        print(f"  DAILY JOB DIGEST - {now_str}")
+        print(f"  {len(jobs)} New Senior Executive Role(s) Found")
+        print("="*70)
 
+        # Sort by relevance score descending
+        jobs_scored = [(j, score_job(j['title'], j['company'], j['description'])) for j in jobs]
+        jobs_scored.sort(key=lambda x: x[1], reverse=True)
+
+        for idx, (job, score) in enumerate(jobs_scored, 1):
+            badge = "STRONG MATCH" if score >= 3 else ("Relevant" if score >= 1 else "")
+            print(f"\n{'─'*70}")
+            print(f"  #{idx}  {job['title']}")
+            print(f"  Company:  {job['company']}")
+            print(f"  Location: {job['location']}")
+            print(f"  Source:   {job['source']}")
+            if badge:
+                print(f"  Match:    {badge} (score: {score})")
+            print(f"  Link:     {job['url']}")
+
+        print(f"\n{'='*70}")
+        print(f"  END OF API RESULTS")
+        print("="*70)
+
+    # Always print LinkedIn search links for manual browsing
     print("\n" + "="*70)
-    print(f"  DAILY JOB DIGEST - {datetime.datetime.utcnow().strftime('%B %d, %Y')}")
-    print(f"  {len(jobs)} New Senior Executive Role(s) Found")
+    print("  LINKEDIN SEARCH LINKS (click to browse live results)")
     print("="*70)
+    for label, url in LINKEDIN_SEARCH_URLS:
+        print(f"  {label}:")
+        print(f"    {url}")
+    print()
 
-    # Sort by relevance score descending
-    jobs_scored = [(j, score_job(j['title'], j['company'], j['description'])) for j in jobs]
-    jobs_scored.sort(key=lambda x: x[1], reverse=True)
-
-    for idx, (job, score) in enumerate(jobs_scored, 1):
-        badge = "⭐ STRONG MATCH" if score >= 3 else ("✓ Relevant" if score >= 1 else "")
-        print(f"\n{'─'*70}")
-        print(f"  #{idx}  {job['title']}")
-        print(f"  Company:  {job['company']}")
-        print(f"  Location: {job['location']}")
-        print(f"  Source:   {job['source']}")
-        if badge:
-            print(f"  Match:    {badge} (score: {score})")
-        print(f"  Link:     {job['url']}")
-        if job.get('description'):
-            desc = job['description'].replace('<[^>]+>', '').strip()[:200]
-            print(f"  Preview:  {desc}...")
-
-    print(f"\n{'='*70}")
-    print(f"  END OF DIGEST")
-    print("="*70 + "\n")
+    # Indeed search links
+    print("="*70)
+    print("  INDEED SEARCH LINKS (click to browse live results)")
+    print("="*70)
+    indeed_searches = [
+        ("Managing Director AI/Tech", "https://www.indeed.com/jobs?q=Managing+Director+AI+Technology&l=United+States&sort=date"),
+        ("VP/SVP Technology", "https://www.indeed.com/jobs?q=Vice+President+SVP+Technology&l=United+States&sort=date"),
+        ("EVP Managed Services/Cloud", "https://www.indeed.com/jobs?q=EVP+Managed+Services+Cloud+Outsourcing&l=United+States&sort=date"),
+    ]
+    for label, url in indeed_searches:
+        print(f"  {label}:")
+        print(f"    {url}")
+    print()
 
 def main():
-    print(f"Daily Job Digest v7 - {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
+    print(f"Daily Job Digest v8 - {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
     print("Searching for MD / VP / EVP / SVP roles in AI, Tech, Managed Services...")
     print()
 
@@ -196,6 +278,11 @@ def main():
 
     print("Fetching The Muse...")
     jobs = fetch_themuse()
+    all_jobs.extend(jobs)
+    print(f"  {len(jobs)} exec roles found")
+
+    print("Fetching Indeed RSS...")
+    jobs = fetch_indeed_rss()
     all_jobs.extend(jobs)
     print(f"  {len(jobs)} exec roles found")
 
